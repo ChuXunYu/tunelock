@@ -28,8 +28,8 @@ Experiences/
 |------|---------------------|------------|--------------|
 | 文件头 | `fLaC` 加密 + 192B 尾部元数据 | 0x400B 头部(KGM_MAGIC + audio_hash) + 加密流 | `CTENFDAM` + keydata(128B) + meta + 封面 |
 | 解密模块 | `QQMusicCommon.dll` → `CommonFunction.dll` | `QMDECRYPTION.dll`（**腾讯模块，被酷狗复用**） | `cloudmusic.dll`（固定 key 常量内嵌 .rdata） |
-| 算法 | 定制 RC4 + 浮点随机偏移，512B 密钥 | **同源**：定制 RC4(Map/RC4 分支) + tan 随机，512B 密钥 | buildKeyBox S-box + 256B XOR 表流密码 |
-| 密钥来源 | 内嵌文件（尾部元数据） | **本地数据库** `KGMusicV3.db`（AES 分页）按 audio_hash 查 eKey | **内嵌文件**（keydata AES 解密派生） |
+| 算法 | 定制 RC4 + 浮点随机偏移，512B 密钥 | **同源**：定制 RC4(Map/RC4 分支) + tan 随机，512B 密钥；**kgma 用 KGM 流表(三张272B)** | buildKeyBox S-box + 256B XOR 表流密码 |
+| 密钥来源 | 内嵌文件（尾部元数据） | **本地数据库** `KGMusicV3.db`（AES 分页）按 audio_hash 查 eKey；**kgma 例外**（密钥内嵌文件头 0x1C） | **内嵌文件**（keydata AES 解密派生） |
 | 密钥派生 | 直接使用 | base64 → TEA(v1/v2) 派生 | keydata XOR 0x64 → AES(sCoreKey) → 取 [17:] |
 | 离线解密 | ✅ 无需运行客户端 | ✅ 无需网络/客户端，但需本机数据库有该歌 eKey | ✅ 文件自带密钥，**换账号/换电脑均可** |
 | 工具 | `tools/QQMusic/QqmDec.exe`(C) | `tools/KgDec.py`(Python) | `tools/WYYDec.py`(Python) |
@@ -40,7 +40,9 @@ Experiences/
 |------|------|------|
 | `tools/QQMusic/QqmDec.exe` | QQ 音乐 | 原生 C，wmain Unicode，P/Invoke 调 CommonFunction.dll |
 | `tools/QQMusic/QqmDec.c` | QQ 音乐 | 上述 exe 源码 |
-| `tools/KgDec.py` | 酷狗 | 纯 Python，自动定位数据库→查 eKey→派生→解密，支持批量（归档副本 `Experiences/KGMusic/scripts/KgDec.py`） |
+| `tools/KgDec_dll.py` | 酷狗 | **推荐**：ctypes 调 QMDECRYPTION.dll，`CreateDecryption(eKey原文)` 解密 kgg，256/512 key 通吃（归档 `Experiences/KGMusic/scripts/`） |
+| `tools/KgDec.py` | 酷狗 | 纯 Python 备选：定位数据库→查 eKey→派生→RC4/Map 解密（归档副本同） |
+| `Experiences/KGMusic/scripts/kgm_dec.c/.exe` | 酷狗 | **kgma/kgm 解密器**（C），密钥内嵌文件头 + 三张 272 字节表流解密 |
 | `tools/WYYDec.py` | 网易云 | 纯 Python，解析 ncm→派生 key→解 meta→解密音频，四档音质通用（归档副本 `Experiences/WYYMusic/scripts/WYYDec.py`） |
 
 ## 通用方法论（三个库共用）
