@@ -3,9 +3,10 @@
  *
  * 直接调用 QQMusicCommon.dll 的 EncAndDesMediaFile 类完成解密。
  * 类方法使用 MSVC thiscall 约定，MinGW gcc 的 __thiscall 属性直接支持。
+ * 使用 wmain 宽字符入口，支持中文/韩文等 Unicode 文件名。
  *
  * 编译(32位, msys2 mingw32):
- *   gcc -O2 -static -o QqmDec.exe QqmDec.c -lkernel32 -luser32
+ *   gcc -O2 -o QqmDec.exe QqmDec.c -lkernel32 -luser32 -municode
  *
  * 用法:
  *   QqmDec.exe <src.mflac> <out.flac>
@@ -17,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define QQ_DIR_DEFAULT "E:\\QQMusic"
+#define QQ_DIR_DEFAULT L"E:\\QQMusic"
 #define OBJ_SIZE 0x28
 
 /* EncAndDesMediaFile 类方法 (thiscall: this 进 ECX) */
@@ -40,14 +41,14 @@ static void fatal(const char *msg)
     exit(1);
 }
 
-static int init_dll(const char *qqDir)
+static int init_dll(const wchar_t *qqDir)
 {
-    typedef BOOL (WINAPI *FnSetDllDir)(LPCSTR);
+    typedef BOOL (WINAPI *FnSetDllDir)(LPCWSTR);
     HMODULE hK = LoadLibraryA("kernel32.dll");
-    FnSetDllDir setDllDir = (FnSetDllDir)GetProcAddress(hK, "SetDllDirectoryA");
+    FnSetDllDir setDllDir = (FnSetDllDir)GetProcAddress(hK, "SetDllDirectoryW");
     if (setDllDir) setDllDir(qqDir);
 
-    g_hDll = LoadLibraryA("QQMusicCommon.dll");
+    g_hDll = LoadLibraryW(L"QQMusicCommon.dll");
     if (!g_hDll) fatal("LoadLibrary QQMusicCommon.dll");
 
     g_ctor   = (FnCtor)GetProcAddress(g_hDll, "??0EncAndDesMediaFile@@QAE@XZ");
@@ -98,80 +99,75 @@ done:
     return ok;
 }
 
-int main(int argc, char **argv)
+int wmain(int argc, wchar_t **argv)
 {
-    const char *qqDir;
-    char qqDirBuf[MAX_PATH];
+    const wchar_t *qqDir;
+    wchar_t qqDirBuf[MAX_PATH];
 
     if (argc < 3) {
-        printf("usage: QqmDec.exe <src.mflac> <out.flac>\n");
-        printf("       QqmDec.exe <srcDir> <outDir>\n");
+        wprintf(L"usage: QqmDec.exe <src.mflac> <out.flac>\n");
+        wprintf(L"       QqmDec.exe <srcDir> <outDir>\n");
         return 1;
     }
 
     /* QQ 目录：exe 同目录优先，否则默认 */
-    GetModuleFileNameA(NULL, qqDirBuf, MAX_PATH);
+    GetModuleFileNameW(NULL, qqDirBuf, MAX_PATH);
     {
-        char *slash = strrchr(qqDirBuf, '\\');
+        wchar_t *slash = wcsrchr(qqDirBuf, L'\\');
         if (slash) *slash = 0;
     }
     {
-        char probe[MAX_PATH];
-        sprintf(probe, "%s\\QQMusicCommon.dll", qqDirBuf);
-        qqDir = (GetFileAttributesA(probe) != INVALID_FILE_ATTRIBUTES) ? qqDirBuf : QQ_DIR_DEFAULT;
+        wchar_t probe[MAX_PATH];
+        _snwprintf(probe, MAX_PATH, L"%s\\QQMusicCommon.dll", qqDirBuf);
+        qqDir = (GetFileAttributesW(probe) != INVALID_FILE_ATTRIBUTES) ? qqDirBuf : QQ_DIR_DEFAULT;
     }
 
     init_dll(qqDir);
 
     {
-        DWORD attr = GetFileAttributesA(argv[1]);
+        DWORD attr = GetFileAttributesW(argv[1]);
         int isDir = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
         if (isDir) {
-            WIN32_FIND_DATAA fd;
+            WIN32_FIND_DATAW fd;
             HANDLE hFind;
-            char pat[MAX_PATH];
+            wchar_t pat[MAX_PATH];
             int n = 0;
-            sprintf(pat, "%s\\*", argv[1]);
-            CreateDirectoryA(argv[2], NULL);
-            hFind = FindFirstFileA(pat, &fd);
+            _snwprintf(pat, MAX_PATH, L"%s\\*", argv[1]);
+            CreateDirectoryW(argv[2], NULL);
+            hFind = FindFirstFileW(pat, &fd);
             if (hFind != INVALID_HANDLE_VALUE) {
                 do {
-                    const char *ext;
-                    const char *dot;
-                    char base[MAX_PATH], full[MAX_PATH], out[MAX_PATH];
+                    const wchar_t *ext;
+                    const wchar_t *dot;
+                    wchar_t base[MAX_PATH], full[MAX_PATH], out[MAX_PATH];
                     size_t len;
-                    wchar_t wsrc[MAX_PATH], wdst[MAX_PATH];
 
                     if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-                    ext = strrchr(fd.cFileName, '.');
+                    ext = wcsrchr(fd.cFileName, L'.');
                     if (!ext) continue;
-                    if (strcmp(ext, ".mflac") != 0 && strcmp(ext, ".mgg") != 0) continue;
+                    if (wcscmp(ext, L".mflac") != 0 && wcscmp(ext, L".mgg") != 0) continue;
 
-                    dot = strrchr(fd.cFileName, '.');
+                    dot = wcsrchr(fd.cFileName, L'.');
                     len = (size_t)(dot - fd.cFileName);
-                    memcpy(base, fd.cFileName, len);
+                    if (len >= MAX_PATH) len = MAX_PATH - 1;
+                    wcsncpy(base, fd.cFileName, len);
                     base[len] = 0;
-                    sprintf(out, "%s\\%s.%s", argv[2], base,
-                            strcmp(ext, ".mflac") == 0 ? "flac" : "ogg");
-                    sprintf(full, "%s\\%s", argv[1], fd.cFileName);
+                    _snwprintf(out, MAX_PATH, L"%s\\%s.%s", argv[2], base,
+                             wcscmp(ext, L".mflac") == 0 ? L"flac" : L"ogg");
+                    _snwprintf(full, MAX_PATH, L"%s\\%s", argv[1], fd.cFileName);
 
-                    MultiByteToWideChar(CP_ACP, 0, full, -1, wsrc, MAX_PATH);
-                    MultiByteToWideChar(CP_ACP, 0, out, -1, wdst, MAX_PATH);
-                    if (decrypt_file(wsrc, wdst) == 0) {
-                        printf("[OK] %s\n", fd.cFileName);
+                    if (decrypt_file(full, out) == 0) {
+                        wprintf(L"[OK] %s\n", fd.cFileName);
                         n++;
                     } else {
-                        printf("[FAIL] %s\n", fd.cFileName);
+                        wprintf(L"[FAIL] %s\n", fd.cFileName);
                     }
-                } while (FindNextFileA(hFind, &fd));
+                } while (FindNextFileW(hFind, &fd));
                 FindClose(hFind);
             }
-            printf("done: %d decrypted\n", n);
+            wprintf(L"done: %d decrypted\n", n);
         } else {
-            wchar_t wsrc[MAX_PATH], wdst[MAX_PATH];
-            MultiByteToWideChar(CP_ACP, 0, argv[1], -1, wsrc, MAX_PATH);
-            MultiByteToWideChar(CP_ACP, 0, argv[2], -1, wdst, MAX_PATH);
-            return decrypt_file(wsrc, wdst);
+            return decrypt_file(argv[1], argv[2]);
         }
     }
 
