@@ -42,13 +42,15 @@ QQ 音乐下载的 VIP 歌曲以专属加密格式保存：`.mflac`（加密的 
 
 ### 编译（可选，已提供 exe）
 
-需要 32 位 csc（`.NET Framework` 自带）：
+原生 C 版本（推荐，启动快、无 .NET 依赖）：
 
-```powershell
-C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe /nologo /platform:x86 /out:QqmDec.exe QqmDec.cs
+```bash
+# 需要 32 位 MinGW（msys2 的 mingw32 环境）
+gcc -O2 -o QqmDec.exe QqmDec.c -lkernel32 -luser32
 ```
 
-注意：必须用 `Framework`（32 位）目录下的 csc，因为 QQMusicCommon.dll 是 32 位 DLL。
+> 说明：`QQMusicCommon.dll` 是 32 位 DLL，必须用 32 位编译器。
+> 已提供预编译的 `QqmDec.exe`，直接使用即可。
 
 ### 运行
 
@@ -60,9 +62,16 @@ QqmDec.exe <输入.mflac> <输出.flac>
 QqmDec.exe <输入目录> <输出目录>
 ```
 
+### 性能说明
+
+- 解密本身约 0.6 秒/文件
+- 每次进程启动有约 5 秒固定开销，来自 QQ 音乐 `QQMusicCommon.dll`
+  加载/卸载（Open 初始化解密器后的 DLL 清理，无法避免）
+- **建议用批量模式**：一次启动处理多个文件，固定开销只付一次
+  （2 个文件约 6.3 秒，与 1 个文件的 5.7 秒接近）
+
 依赖：运行时自动从 QQ 音乐安装目录（默认 `E:\QQMusic`，若 exe 与
-`QQMusicCommon.dll` 同目录则用该目录）复制 `CommonFunction.dll`、`MSVCP140.dll`、
-`VCRUNTIME140.dll`、`ucrtbase.dll` 等到 exe 目录。
+`QQMusicCommon.dll` 同目录则用该目录）加载解密所需 DLL。
 
 ## 验证结果
 

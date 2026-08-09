@@ -24,13 +24,24 @@
 4. **算法是定制版 RC4 流密码 + 浮点随机偏移**，密钥 512 字节 base64 字符串
 5. **离线解密 = 直接 P/Invoke 调用 DLL 类方法**，无需运行 QQ 音乐
 
+## 工具链演进（重要经验）
+
+| 阶段 | 方案 | 结果 |
+|------|------|------|
+| v1 | C#（32 位 csc，`CallingConvention.ThisCall`） | 可用，单文件 7s |
+| v2 | 原生 C（msys2 mingw32 i686 gcc，`__thiscall`） | **最终采用**，单文件 5.7s，无运行时依赖 |
+
+**性能结论**：解密本身只要 0.6s；约 5 秒是 `QQMusicCommon.dll` 在 Open 后
+进程退出时的资源清理开销（腾讯 DLL 固有，换语言无法消除）。
+建议用**批量模式**一次处理多文件摊薄固定开销（详见 `03-工具链构建.md` §6）。
+
 ## 文档索引
 
 | 文件 | 内容 |
 |------|------|
 | `01-文件格式分析.md` | mflac 文件结构、尾部元数据块、缓存目录定位 |
 | `02-算法逆向记录.md` | EncAndDesMediaFile 类、CommonFunction.dll 算法、IAT/关键偏移 |
-| `03-工具链构建.md` | C# 离线调用方案、32 位 csc、DLL 搜索顺序坑 |
+| `03-工具链构建.md` | C 原生方案、msys2 工具链、`__thiscall`、DLL 搜索坑、性能定位方法论 |
 | `04-版本更新应对指南.md` | QQ 音乐更新后如何用本库快速定位新算法 |
 | `scripts/` | 可复用分析脚本（反汇编、字符串扫描、密钥 dump） |
 
@@ -41,4 +52,4 @@
 - `scripts/read_tail.py` — mflac 文件头尾结构分析
 - `scripts/dump_key.py` — 密钥 dump 原理说明（详见 02 文档）
 - `scripts/QqmKeyDump.cs` — 密钥 dump 工具源码（32 位 csc 编译）
-- `scripts/QqmDec.cs` — 离线解密工具源码（tools/QqmDec.exe 的源）
+- `scripts/QqmDec.c` — 离线解密工具源码（tools/QqmDec.exe 的源，原生 C）
