@@ -1,66 +1,53 @@
-# QQ 音乐 mflac/mgg 解密逆向经验库
+# 音频平台加密逆向经验库
 
-> 目标：沉淀 QQ 音乐音频加密格式的逆向分析方法、算法结论与工具链，
-> 使将来 QQ 音乐版本更新、加密算法调整后，能基于本库快速定位并更新破解方案。
+> 沉淀腾讯系/酷狗系音乐客户端加密音频格式的逆向方法、算法结论与离线解密工具链。
+> 目标：平台版本更新、加密方案调整后，能基于本库快速定位并更新破解方案。
 
-## 版本基线
+## 目录结构
 
-| 项目 | 值 |
-|------|-----|
-| 分析日期 | 2026-08-09 |
-| QQ 音乐版本 | 2231.3575（日志 `QQMusic(2231.3575)20260809041605.log`） |
-| 安装目录 | `E:\QQMusic` |
-| 缓存目录 | `D:\Temp\QQ_music_caches\`（注册表 `HKCU\Software\Tencent\QQMusic\LogConfig\CACHEPATH`） |
-| 样本文件 | `musics\Michael Jackson - Billie Jean.mflac` 等 |
+```
+Experiences/
+├── README.md          ← 本索引
+├── QQMusic/           腾讯 QQ 音乐 mflac/mgg 解密
+│   ├── README.md      核心结论、版本基线、踩坑
+│   ├── 01~04 *.md     文件格式 / 算法逆向 / 工具链 / 版本应对
+│   └── scripts/       反汇编、扫描、密钥 dump 等分析脚本
+└── KGMusic/           酷狗音乐 KGG/kgma 解密
+    ├── README.md      核心结论、版本基线、踩坑
+    ├── 01~04 *.md     文件格式 / 算法逆向 / 工具链 / 版本应对
+    └── scripts/       KgDec.py（解密工具副本）
+```
 
-## 核心结论速览
+## 平台对比速览
 
-1. **`.mflac` 文件 = 加密 FLAC 数据 + 192 字节下载器附加元数据块**
-   - 元数据块含：歌曲 ID（UTF-16LE）、P2P 缓存文件名（UTF-16LE）、`musicex\0` 尾部标记
-   - 解密后元数据块被去除，输出标准 FLAC（头 `fLaC`）
-2. **解密核心不在主 DLL**，而在 `QQMusicCommon.dll` 的 `EncAndDesMediaFile` 类
-3. **实际算法位于 `CommonFunction.dll`**（运行时通过 `LoadLibraryW` 动态加载），
-   导出序号 3/8/9 构造解密器
-4. **算法是定制版 RC4 流密码 + 浮点随机偏移**，密钥 512 字节 base64 字符串
-5. **离线解密 = 直接 P/Invoke 调用 DLL 类方法**，无需运行 QQ 音乐
-6. **mgg 与 mflac 同算法**：HQ(`_H.mgg`)、标准(`_L.mgg`)、mflac 全部用同一
-   `EncAndDesMediaFile` 路径解密，输出 Ogg（头 `OggS`）
+| 维度 | QQ 音乐 (mflac/mgg) | 酷狗 (kgg) |
+|------|---------------------|------------|
+| 文件头 | `fLaC` 加密 + 192B 尾部元数据 | 0x400B 头部(KGM_MAGIC + audio_hash) + 加密流 |
+| 解密模块 | `QQMusicCommon.dll` → `CommonFunction.dll` | `QMDECRYPTION.dll`（**腾讯模块，被酷狗复用**） |
+| 算法 | 定制 RC4 + 浮点随机偏移，512B 密钥 | **同源**：定制 RC4(Map/RC4 分支) + tan 随机，512B 密钥 |
+| 密钥来源 | 内嵌文件（尾部元数据） | **本地数据库** `KGMusicV3.db`（AES 分页）按 audio_hash 查 eKey |
+| 密钥派生 | 直接使用 | base64 → TEA(v1/v2) 派生 |
+| 离线解密 | ✅ 无需运行客户端 | ✅ 无需网络/客户端，但需本机数据库有该歌 eKey |
+| 工具 | `tools/QQMusic/QqmDec.exe`(C) | `tools/KgDec.py`(Python) |
 
-## 重要踩坑（务必先读）
+## 工具索引
 
-| 坑 | 现象 | 真相 |
-|----|------|------|
-| mgg Open 失败 | 对 `_L.mgg` 报 Open=0、EncType=0 | **不是格式问题**，是韩文/中文文件名在 PowerShell→argv 传递时被损坏成 `?`，DLL 找不到文件 |
-| GetEncType 按扩展名 | 看似按文件头判断 | 实际按**扩展名**匹配（`.mflac`/`.mgg`/`.mmp4` → EncType=2） |
-| msys2 swprintf | 拼接路径只剩首字符 | MinGW 的 `swprintf` 是 **POSIX 风格（无 size 参数）**，Windows 风格需用 `_snwprintf` |
-
-## 工具链演进（重要经验）
-
-| 阶段 | 方案 | 结果 |
+| 工具 | 平台 | 说明 |
 |------|------|------|
-| v1 | C#（32 位 csc，`CallingConvention.ThisCall`） | 可用，单文件 7s，不支持 Unicode 文件名 |
-| v2 | 原生 C（msys2 mingw32 i686 gcc，`__thiscall`） | 单文件 5.7s，无运行时依赖 |
-| v3 | 原生 C + **wmain 宽字符** | **最终采用**，支持中文/韩文文件名 |
+| `tools/QQMusic/QqmDec.exe` | QQ 音乐 | 原生 C，wmain Unicode，P/Invoke 调 CommonFunction.dll |
+| `tools/QQMusic/QqmDec.c` | QQ 音乐 | 上述 exe 源码 |
+| `tools/KgDec.py` | 酷狗 | 纯 Python，自动定位数据库→查 eKey→派生→解密，支持批量（归档副本 `Experiences/KGMusic/scripts/KgDec.py`） |
 
-**性能结论**：解密本身只要 0.6s；约 5 秒是 `QQMusicCommon.dll` 在 Open 后
-进程退出时的资源清理开销（腾讯 DLL 固有，换语言无法消除）。
-建议用**批量模式**一次处理多文件摊薄固定开销（详见 `03-工具链构建.md` §6）。
+## 通用方法论（两个库共用）
 
-## 文档索引
+1. **定位解密模块**：字符串扫描安装目录 DLL（找文件扩展名 `.mflac/.kgg`、`Decrypt`、加密相关导出）
+2. **文件结构分析**：对比头部/尾部，找 KGM/固定 magic、大小字段、哈希字段
+3. **密钥管理是关键**：确认密钥是内嵌（QQ）还是外部分发（酷狗本地数据库/网络）
+4. **算法识别**：QMDECRYPTION.dll 是腾讯 QQ 音乐模块 → 与 QQ 音乐算法同源（RC4+tan 随机）
+5. **动态验证**：先写小脚本用已知明文反推/直接调 DLL，再离线实现
+6. **交叉验证**：对照 GitHub 开源实现（如 unlock-music、KGG-Decryptor）
 
-| 文件 | 内容 |
-|------|------|
-| `01-文件格式分析.md` | mflac/mgg 文件结构、尾部元数据块、质量等级、缓存目录定位 |
-| `02-算法逆向记录.md` | EncAndDesMediaFile 类、GetEncType 扩展名判定、CommonFunction.dll 算法、IAT/关键偏移 |
-| `03-工具链构建.md` | C 原生方案、msys2 工具链、`__thiscall`、wmain Unicode、DLL 搜索坑、性能定位 |
-| `04-版本更新应对指南.md` | QQ 音乐更新后如何用本库快速定位新算法 |
-| `scripts/` | 可复用分析脚本（反汇编、字符串扫描、密钥 dump） |
+## 版本更新应对
 
-## 关键文件
-
-- `scripts/disasm.py` — pefile+capstone 反汇编辅助
-- `scripts/scan_dll.py` — DLL 导出符号/字符串扫描
-- `scripts/read_tail.py` — mflac/mgg 文件头尾结构分析
-- `scripts/dump_key.py` — 密钥 dump 原理说明（详见 02 文档）
-- `scripts/QqmKeyDump.cs` — 密钥 dump 工具源码（32 位 csc 编译）
-- `scripts/QqmDec.c` — 离线解密工具源码（tools/QqmDec.exe 的源，原生 C，wmain Unicode）
+- 平台更新后先看：文件头 magic / crypto_ver / 解密 DLL 导出是否变化
+- 各子库 `04-版本更新应对指南.md` 给出了指纹速查表与定位流程
