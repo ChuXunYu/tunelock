@@ -1,0 +1,37 @@
+# 统一换行：仓库里一律 LF，Windows 脚本保持 CRLF 以免 PowerShell 5.1 出怪问题
+* text=auto eol=lf
+
+*.py   text
+*.md   text
+*.c    text
+*.h    text
+*.cs   text
+*.toml text
+*.json text
+
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制
+*.exe  binary
+*.dll  binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.zip  binary
+*.7z   binary
+
+# 样本/音频（正常情况下被 .gitignore 挡住，这里再兜一层）
+*.flac binary
+*.mp3  binary
+*.ogg  binary
+*.mflac binary
+*.mgg  binary
+*.kgg  binary
+*.kgma binary
+*.ncm  binary
+
+# GitHub 语言统计：把 C# 辅助工具和文档当次要内容
+tools/native/qqmusic/*.cs linguist-language=C#
+docs/* linguist-documentation

@@ -1,5 +1,52 @@
+# --- 版权内容：加密封装与解出的音频一律不入库 -------------------------------
+# 这些文件属于各平台/唱片公司，仓库里只放代码与文档。
+*.mflac
+*.mgg
+*.mmp4
+*.kgg
+*.kgma
+*.kgm
+*.ncm
+*.krc
+*.flac
+*.mp3
+*.ogg
+*.m4a
+*.wav
 musics/
-.reverse-skill/
-QQMusic_Installer.exe
-output/
 Installers/
+output/
+decoded/
+*_decoded/
+
+# 只保留样本目录的说明文件，样本自己放
+samples/*
+!samples/README.md
+
+# --- 第三方私有库：从本机安装目录自备，绝不提交 -----------------------------
+# QQMusicCommon.dll / CommonFunction.dll 是腾讯的二进制，QMDECRYPTION.dll 来自酷狗。
+# 放到 tools/native/qqmusic/bin/ 就能用，但不要提交（*.dll 已被整体忽略）。
+*.dll
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+.eggs/
+
+# --- 编辑器 / 系统 ---------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- GUI 记住的路径 --------------------------------------------------------
+.tunelock_gui.json

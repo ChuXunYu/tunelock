@@ -1,0 +1,3 @@
+# 核心依赖：只有解密需要的一门加密库
+#   pip install -r requirements.txt
+cryptography>=41.0

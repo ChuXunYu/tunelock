@@ -1,0 +1,11 @@
+# 可选依赖（都不影响核心解密）
+#   pip install -r requirements-optional.txt
+
+# GUI 的文件/文件夹拖拽（不装也能跑，只是不能拖）
+tkinterdnd2>=0.3
+
+# tools/analysis/ 里的逆向分析脚本
+pefile>=2023.2.7
+capstone>=5.0
+
+# 歌词内嵌需要系统里有 ffmpeg（不在 pip 里）：scoop install ffmpeg / winget install ffmpeg

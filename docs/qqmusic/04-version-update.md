@@ -1,0 +1,114 @@
+# 04 - 版本更新应对指南
+
+> QQ 音乐每次升级都可能：改导出符号、换 DLL 依赖、替换加密算法。
+> 本指南给出"升级后如何快速重新定位算法"的完整流程。
+
+## 流程总览
+
+```
+1. 重新收集样本（新版 mflac/mgg）
+2. 确认文件结构是否变化（头/尾）
+3. 在新版 DLL 中重新定位 EncAndDesMediaFile
+4. 若导出符号变 → 用字符串/特征重新找类
+5. 若算法变 → 反汇编 CommonFunction.dll 相关函数
+6. 更新 QqmDec.c 的导出名/调用序列
+7. 回归验证
+```
+
+## 1. 收集新样本
+
+- 新版 QQ 音乐下载 VIP 歌曲 → `%USERPROFILE%\Music\VipSongsDownload\*.mflac`
+- 或读取缓存目录 `D:\Temp\QQ_music_caches\downloadproxyNew\tp2p\.tpfs\duty\`
+- **注意**：`samples\*.mflac` = 缓存文件 + 192 字节尾部，解密后应与缓存文件大小一致
+
+## 2. 文件结构变化检测
+
+```python
+# 对比 samples 文件与缓存文件
+a = read(samples_file); b = read(cache_file)
+print(a.startswith(b))          # True = 结构未变
+extra = a[len(b):]; print(len(extra))  # 尾部块长度
+```
+
+- 若 `a.startswith(b)` 仍成立 → 加密数据区结构未变，算法大概率兼容
+- 若尾部长变/消失 → 元数据块格式变了（不影响解密）
+
+## 3. 重新定位 EncAndDesMediaFile
+
+### 3.1 导出符号未变（最理想）
+新版 QQMusicCommon.dll 导出表直接搜：
+
+```python
+python tools/analysis/scan_dll.py E:\QQMusic\QQMusicCommon.dll --export --filter EncAndDesMediaFile
+```
+
+若 `??0EncAndDesMediaFile@@QAE@XZ` 还在 → 工具无需改，直接验证。
+
+### 3.2 符号变了（改名/脱符号）
+用特征定位：
+1. 搜字符串 `CommonFunction.dll`（Open 内 LoadLibraryW 的参数）→ 找到 Open 函数
+2. 找 `LoadLibraryW` + `GetProcAddress` 调用模式
+3. 从 GetProcAddress 的序号参数（3/8/9）顺藤摸瓜
+
+```python
+python tools/analysis/disasm.py E:\QQMusic\QQMusicCommon.dll 0x12FB5 0x300
+```
+
+## 4. 解密模块变化检测
+
+- 若 `CommonFunction.dll` 仍存在且导出序号 3/8/9 仍在 → 算法大概率未变
+- 验证：hook 解密器 SetKey，看 key 是否仍是 512 字节 base64
+- 若 CommonFunction.dll 消失/改名 → 找新解密 DLL：
+  - 在 QQMusicCommon.dll 里搜 `LoadLibraryW` 的字符串参数（`.rdata` 段）
+  - 找到后 dump 它的导出，识别创建解密器的函数
+
+## 5. 算法变更时的逆向路径
+
+若 key 不再是 base64 或 RC4 变体行为改变：
+
+1. **提取密钥**：hook `[this+0x14]->vtable[1]`（SetKey）打印 key
+2. **对比新老 key**：长度、字符集变化说明密钥生成变了
+3. **定位新 PRGA**：在解密 DLL 中找 RC4 特征（`idiv esi` + swap 模式），
+   或找 `0x1400`（块大小）立即数
+4. **浮点偏移逻辑**：找 `[this+0x28]` 累积乘积 + `divsd/mulsd` 模式
+5. **改写 QqmDec.c**：
+   - 若只是导出名/RVA 变 → 更新 `GetProcAddress` 字符串
+   - 若调用序列变 → 调整 Open/Read 参数
+   - 编译：`gcc -O2 -o QqmDec.exe QqmDec.c -lkernel32 -luser32 -municode`
+     （msys2 mingw32，注意 `-municode` 对应 wmain）
+
+## 6. 快速验证清单
+
+```powershell
+QqmDec.exe "新样本.mflac" "test.flac"
+QqmDec.exe "新样本.mgg" "test.ogg"
+# 检查
+python -c "open('test.flac','rb').read(4)"   # mflac 应输出 b'fLaC'
+python -c "open('test.ogg','rb').read(4)"    # mgg 应输出 b'OggS'
+```
+
+- 输出 `fLaC` 开头（mflac）/ `OggS` 开头（mgg）→ 成功
+- 输出随机字节 → 密钥/算法不匹配
+- Open 失败 → 先检查**文件名编码**（韩文/中文文件名用 wmain 版本），
+  再检查导出符号和 DLL 搜索
+- 注意：mflac/mgg/mmp4 三个扩展名都是 EncType=2，同一路径解密
+
+## 7. 备选方案（Frida 动态）
+
+若静态改动过大，可用 Frida 挂进程直接调 DLL（`hook_qq_music.js` 思路，
+来自开源项目 `luyikk/qqmusic_decrypt`）：
+- 无需逆向算法
+- 但需要 QQ 音乐运行中
+- 适合应急，不适合批量/离线
+
+## 8. 关键资产清单
+
+| 资产 | 位置 |
+|------|------|
+| 解密工具源码 | `tools/native/qqmusic/QqmDec.c`（原生 C，wmain Unicode，msys2 mingw32 编译） |
+| 解密工具 exe | `tools/native/qqmusic/bin/QqmDec.exe` |
+| 反汇编脚本 | `tools/analysis/disasm.py` |
+| 导出扫描脚本 | `tools/analysis/scan_dll.py` |
+| 文件头尾分析 | `tools/analysis/read_tail.py` |
+| 密钥 dump 工具 | `tools/native/qqmusic/QqmKeyDump.cs`（思路见 02 文档） |
+| 编译环境 | msys2 mingw32（i686 gcc），见 03 文档 §2 |

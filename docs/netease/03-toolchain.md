@@ -1,0 +1,56 @@
+# 03 - 工具链构建
+
+## 1. 最终工具：`tools/netease.py`
+
+纯 Python，无第三方库以外的依赖（`pip install cryptography`）。
+
+```
+python netease.py <ncm文件或目录> [输出目录]
+```
+
+示例：
+```
+python tools\netease.py samples\WYYMusic output\wyy
+
+[成功] ...\Charlie Puth - I Don’t Think That I Like Her.ncm -> ...\Charlie Puth - I Don’t Think That I Like Her.flac (FLAC)  I Don’t Think That I Like Her | Charlie Puth | ... | 999kbps | 188s
+[成功] ...\Muyoi,徐梦洁 - 一点.ncm -> ...\Muyoi,徐梦洁 - 一点.mp3 (MP3)  一点 | Muyoi / 徐梦洁 | ... | 320kbps | 212s
+完成: 4/4 成功
+```
+
+## 2. 功能说明
+
+- 目录批量 / 单文件均可
+- 自动：解析文件头 → 派生 RC4 key → 解 meta(打印歌名/歌手/专辑/码率/时长) → 跳过封面 → 解密音频
+- 自动识别输出格式：ID3→`.mp3`、fLaC→`.flac`、OggS→`.ogg`，未知→`.bin`
+- 输出沿用原文件名（去掉 .ncm）
+
+## 3. 核心实现要点
+
+```python
+# keydata → RC4 key
+keydata = bytes(b ^ 0x64 for b in keydata)
+mkey = aes_ecb_decrypt(CORE_KEY, keydata)   # AES-128-ECB + PKCS7 unpad
+rc4_key = mkey[17:]
+
+# meta → JSON
+data = bytes(b ^ 0x63 for b in meta_raw)     # 去前缀后 base64, AES-ECB(sModifyKey), 去 "music:"
+
+# XOR 表
+keybox = build_key_box(rc4_key)              # 256 字节 S-box
+T = build_xor_table(keybox)                  # 预计算 256 字节
+audio[i] ^= T[i & 0xFF]
+```
+
+## 4. 验证方法
+
+1. 与 `ncmdump`(v1.5.1) 输出对比：
+   - FLAC：比较前 42 字节（`fLaC` + STREAMINFO block）
+   - MP3：跳过各自的 ID3v2 标签后比较帧头与首块/尾块
+2. 解析 FLAC STREAMINFO / MP3 帧头核对采样率、位深、码率与 meta `bitrate` 一致
+3. 任意播放器打开可播
+
+## 5. 依赖与兼容
+
+- Python 3.8+，`cryptography`（含 AES 实现）
+
+- 与平台版本无关：算法/密钥均内嵌文件，客户端版本变化不影响已下载 ncm 的解密

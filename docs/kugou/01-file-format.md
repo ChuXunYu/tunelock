@@ -1,0 +1,71 @@
+# 酷狗 KGG 文件格式分析
+
+> 版本基线：酷狗 20.1.41.27870（`E:\KGMusic\20.1.41.27870`）
+
+## 样本
+
+`samples\KGMusic\` 下 4 个文件（同一首歌不同音质，越大越好）：
+
+| 文件 | 大小 | 类型 | 音质名 | 解密后 |
+|------|------|------|--------|--------|
+| `Daniel Powter - Free Loop.kgg` | 40,826,415 | kgg ver5 | `high` | FLAC |
+| `Daniel Powter - Free Loop(1).kgg` | 8,066,401 | kgg ver5 | `320G` | OGG |
+| `Daniel Powter - Free Loop(2).kgg` | 2,433,797 | kgg ver5 | `128a` | OGG |
+| `Daniel Powter - Free Loop.kgma` | 23,047,198 | kgma ver3 | — | 无 key，不可解 |
+
+## KGG 头部结构（crypto version 5，0x400 字节）
+
+```
+偏移    大小  字段                说明
+0x00   16    KGM_MAGIC           固定: 7C D5 32 EB 86 02 7F 4B A8 AF A6 8E 0F FF 99 14
+0x10    4    audio_offset        = 0x400 (音频数据起始偏移 = 头部大小)
+0x14    4    crypto_ver          = 5
+0x18    4    FF FF FF FF
+0x1C   16    随机/IV 字段        (每文件不同)
+0x2C    4    00 00 00 00
+0x30    4    20 00 00 00
+0x34   32    (ASCII) 早期 hash   与 0x48 处 hash 不同（见下）
+0x54    4    音质编码            03/04/05
+0x58    ..   音质名 ASCII        "128a" / "320G" / "high"
+0x5C   14    随机字段
+0x74    4    00 00 00 00
+0x78   ...   全 0 填充
+0x400  ...   加密音频流          解密起点，offset 从 0 开始
+```
+
+> 注意：`0x44` 处是 **hash_len**（读 u32），`0x48` 处才是 **audio_hash**（ASCII hex）。
+> 工具解析：`pos = 0x3C + 8; hash_len = u32(data[pos..]); audio_hash = data[pos+4:pos+4+hash_len]`。
+
+## KGMA 头部结构（crypto version 3）
+
+```
+0x00  16  KGM_MAGIC
+0x10   4  0x400
+0x14   4  3 (版本)
+0x18   4  01 00 00 00
+0x1C  16  (字段 A，每文件不同)
+0x2C  16  (字段 B，每文件不同)
+0x3C   .. 00...
+```
+
+kgma 无 audio_hash，数据库中对应记录 eKey 为空 → 无法解密（酷狗未分发密钥）。
+
+## 缓存与数据库定位
+
+| 位置 | 内容 |
+|------|------|
+| `D:\KuGou\Temp\*.kg!` | 下载缓存。有的已是明文（如 47MB 的 `c303d988….kg!` 直接是 `fLaC`），有的仍加密（版本3 结构） |
+| `D:\KuGou\Temp\tpp\.tpfs\duty\<hash>\<hash>` | P2P 缓存文件（按 audio_hash 分目录） |
+| `%APPDATA%\KuGou8\KGMusicV3.db` | **核心**：歌曲→eKey 映射数据库（AES 分页加密），另有 `KGMusicV3.bak` 备份 |
+| `%APPDATA%\KuGou8\playlistV3.db` | 播放列表（同样加密） |
+
+## 输出格式识别
+
+按解密后前 4 字节魔术字节：
+
+```
+fLaC  → .flac
+OggS  → .ogg
+ID3   → .mp3
+FF FB/F3/FA → .mp3
+```
